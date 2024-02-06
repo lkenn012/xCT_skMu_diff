@@ -1,17 +1,19 @@
 """
-Code for producing analysis and figures of C2C12 transcriptomics data as reported in publication {Title, DOI}
+Code for producing analysis and figures of C2C12 transcriptomics data as reported in Kanaan et al (2023)
 """
 
 # import modules
 import pandas as pd
 import numpy as np
-
+import collections
 import re
 from sklearn.preprocessing import StandardScaler
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+import scipy.cluster.hierarchy as hierarch
+from scipy.spatial.distance import pdist, squareform
 from scipy.stats import pearsonr, t
 from statsmodels.stats.dist_dependence_measures import distance_correlation
 
@@ -113,6 +115,108 @@ def p_val(x, n):
 
 	return p
 
+# define recursive function for flattening a list which contains lists and int values such that the return is a list of all elements
+def flatten(xs):
+	"""
+	xs = a list of lists and values
+	"""
+	if isinstance(xs, collections.Iterable):
+		return [a for x in xs for a in flatten(x)]
+	else:
+		return [xs]
+
+
+# recursive function to call in get_nearest to get original values from clusters in a linkage matrix
+def get_child(Z, i, n, idxs=False):
+
+	"""
+	Z = a scipy (or sklearn?) linkage matrix where Z[i] = [node_j, node_k, distance, n_values]
+	i = index where we need to get child leaves
+	n = number of original values, will inform what is a new cluster vs. original value
+	idxs = Optional, list of linkage matrix idxs to append child idxs to
+	"""
+	# Get our index values to return
+	val_0 = Z[int(i)][0]
+	val_1 = Z[int(i)][1]
+	idx_0 = int(i)
+	idx_1 = int(i)
+
+	# Check if these values are original values or clusters (where val > n)
+	if val_0 > n:
+		idx_0, val_0 = get_child(Z, val_0-n, n, idxs)
+	if val_1 > n:
+		idx_1, val_1 = get_child(Z, val_1-n, n, idxs)
+	else:
+		pass
+
+	# return the indexes obtained over recursively getting clusters until original values
+	if idxs:
+		idxs = flatten([idx_0, idx_1])
+		return idxs, [val_0, val_1]
+
+	else:
+		return [val_0, val_1]
+
+
+# Define function to get the nearest neighbours of a given observation in a hierarchical clustering linkage map
+def get_nearest(Z, node_index, max_steps=False, max_dist=False, get_links=False):
+
+	"""
+	Z = a scipy (or sklearn?) linkage matrix where Z[i] = [node_j, node_k, distance, n_values]
+		is the new linkage formed at step_i in the clustering algorithm, where a node may be an original value or a new cluster if node_index > n (original samples) and node index = n+i
+	node_index = value index of either the original value we are interested in, or a new cluster formed by the algorithm if node_index > n
+	max_steps = thresholding parameter for the number of clustering steps to extend our nearest neighbour search for
+	max_dist = thresholding parameter for a distance cut-off to threshold the number of clusters we obtain
+	sub_links = whether to get and return the sub linkage matrix, 
+	"""
+
+	n = np.shape(Z)[0] + 1 	# number of original observations/values, corresponds to rows + 1 in Z
+	links_idx = [] 	# list of all linkage matrix indexes for generating a sub matrix if get_links=True
+	steps = 0 	# Thresholding checks
+	last_i = 0
+
+	# Find the first clustering of our node of interest and get all original values in this clustering (using get_child())
+	for i, l in enumerate(Z):
+		# First, iterate over the matrix and work "up" the linkage matrix while checking for our thresholding parameters
+		if l[0] == node_index or l[1] == node_index:
+			links_idx.append(i)
+
+			if max_steps and steps < max_steps: 	# Check that we have not reached max steps
+				steps += 1
+				node_index = i + n
+
+			elif max_dist and l[2] < max_dist: 	# Check that we have not surpassed max distance
+				last_i = i
+				node_index = i + n
+
+			else:
+				if max_dist:
+					l = Z[last_i] 	# For max_dist threshold, we check that our cluster distance is less than thershold, when False we must proceed with the last cluster under the distance threshold
+					del links_idx[-1]
+				# once steps = max_steps we can work back through the linkage matrix to get all the original values contained within clusters
+				if l[0] > n:
+					# print(f'[l[0]] > n')
+					idxs_0, val_0 = get_child(Z, l[0]-n, n, links_idx)
+				else:
+					val_0 = l[0]
+
+				if l[1] > n:
+					# print(f'[l[1]] > n')
+					idxs_1, val_1 = get_child(Z, l[1]-n, n, links_idx)
+				else:
+					val_1 = l[1]
+
+	# convert val_0 and val_1 from lists of lists to flattened list for easy indexing
+	vals = [x for xs in [val_0, val_1] for x in xs]
+
+	# now can return the final list of values
+	if get_links:
+		idxs = [x for xs in [links_idx, idxs_0, idxs_1] for x in xs]
+		idxs = sorted(list(set(idxs)))
+		return Z[idxs], vals
+	else:
+		return vals
+
 
 """
 Define main function which will:
@@ -131,15 +235,16 @@ def main():
 
 	"""
 	parameters to define the analysis, i.e., how to pre-process data and whether to compute correlations
-	Note: correlations are computed with different normalizations than values used in expression plot
+	Note: correlations & clustering are computed with different normalizations than values used in expression plot
 	Thus, visualization and correlations will differ from reported results if only one normalization is used for both 
 	Commenting out either section for different normalization will avoid this.
 	"""
 
 	remove_nan = True 	# replace NAN gene expression with very small value (necessary for some plotting and analysis)
-	scale = False 	# whether to scale the data, used in correlation analysis
-	FC = True		# Specify fold change
-	compute_corrs = False
+	scale = True 	# whether to scale the data, used in correlation & clustering analysis
+	FC = False		# Specify fold change
+	compute_corrs = False 	# Specify computing correlations
+	compute_clust = True  	# Specify computing clustering
 	expr_threshold = (-8,8)		# values to threshold expression Fold Change data for plotting for where extreme values arise
 
 	# Define variables for accessing our data 
@@ -199,11 +304,11 @@ def main():
 
 		dfs.append(df)
 
-	if compute_corrs
+	if compute_corrs:
 		corr_dfs = []
 		for i, df in enumerate(dfs):
 
-			# Generating correlations between 2 time points, not super relevant
+			# Generating correlations between 2 time points, not relevant
 			if len(set(df.loc["Time"])) <= 2:
 				print(f'Only two time points, skipped')
 				continue
@@ -226,6 +331,38 @@ def main():
 
 		out_df.to_csv(rf'C2C12_correlations.csv')
 
+	if compute_clust:
+		clust_dfs = []
+		for i, df in enumerate(dfs):
+
+			# Generating correlations between 2 time points, not relevant
+			if len(set(df.loc["Time"])) <= 2:
+				print(f'Only two time points, skipped')
+				continue
+
+			else:
+				# Calculate distance matrix, default metric = euclidean, calculates distance between rows
+				sample_dist = pdist(df, 'cosine') 	
+				sample_links = hierarch.average(sample_dist) 	# Calculate linkages between samples using ward metric
+
+				# Interested in obtain the nearest neighbours to Slc7a11
+				sub_links, nearest_genes = get_nearest(Z=sample_links, node_index=df.index.get_loc('Slc7a11'), max_dist=0.98, get_links=True)
+				nearest_genes = flatten(nearest_genes)
+
+				sample_dist = pdist(df.iloc[nearest_genes], 'cosine') 	# Calculate distance matrix, default metric = euclidean, calculates distance between rows
+				sample_links = hierarch.average(sample_dist) 	# Calculate linkages between samples using ward metric
+
+				# get nearest genes distances
+				sq_dist = squareform(sample_dist + sample_dist.T)
+				slc7a11_dist = pd.DataFrame(data=sq_dist, index=df.iloc[nearest_genes].index, columns=df.iloc[nearest_genes].index)
+				slc7a11_dist = slc7a11_dist.loc[:,'Slc7a11']
+				slc7a11_dist.to_csv(rf'{data_names[i]}_clusters.csv')
+				clust_dfs.append([nearest_genes, slc7a11_dist, sample_links])  	# Append to list of cluster data for any further analysis
+
+
+	###
+	## 	Code for generating line plot of Genes with Slc7a11 & average lines
+	###
 
 	# now combine our data so we have all samples as rows
 	expr_df = pd.concat(dfs, axis=1) 
@@ -241,10 +378,6 @@ def main():
 		temp = temp.applymap(lambda x: expr_threshold[0] if x < expr_threshold[0] else (expr_threshold[1] if x > expr_threshold[1] else x))
 		temp.loc['Time'] = expr_df.loc['Time']
 		expr_df = temp
-
-	###
-	## 	Code for generating line plot of Genes with Slc7a11 & average lines
-	###
 
 	### Want to visualize the expression of Slc7a11 and relevant genes for differentation, glutathione metabolism over differentiation
 	gene_sets = {'Slc7a11': [r'Slc7a11$', r'Slc7a11.\d$'], 	# regex patterns for exact probe matches

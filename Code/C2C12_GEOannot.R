@@ -1,4 +1,4 @@
-### Code to annotate and extract gene expression data from GEO
+### Code to annotate and extract gene expression data from GEO as reported in Kanaan et al (2023)
 
 ## want to download GEO datasets by GSE ID
 # BiocManager::install("GEOquery", force = TRUE)  # install GEOquery library
