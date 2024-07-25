@@ -1,7 +1,7 @@
 # xCT_skMu_diff
- Code and data for the analysis and plotting of C2C12 transcriptomics data as reported in:
-Kanaan, M. N., Pileggi, C. A., Karam, C. Y., Kennedy, L. S., Fong-McMaster, C., Cuperlovic-Culf, M., & Harper, M. E. (2024). Cystine/glutamate antiporter xCT controls skeletal muscle glutathione redox, bioenergetics and differentiation. Redox Biology, 103213. 
-📄 Paper: [Link](https://doi.org/10.1016/j.redox.2024.103213)
+ Code and data for the analysis and plotting of C2C12 transcriptomics data as reported in:  
+ Kanaan, M. N., Pileggi, C. A., Karam, C. Y., Kennedy, L. S., Fong-McMaster, C., Cuperlovic-Culf, M., & Harper, M. E. (2024). Cystine/glutamate antiporter xCT controls skeletal muscle glutathione redox, bioenergetics and differentiation. *Redox Biology*, 103213.  
+ 📄 Paper: [Link](https://doi.org/10.1016/j.redox.2024.103213)
 
 ## Code
 Contains all Python and R files used in obtaining GEO transcriptomics datasets, analysis of the datasets, and plotting figures used in publication main text and supplementary
